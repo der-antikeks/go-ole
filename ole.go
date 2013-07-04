@@ -67,6 +67,10 @@ func (v *VARIANT) ToString() string {
 	return UTF16PtrToString(*(**uint16)(unsafe.Pointer(&v.Val)))
 }
 
+func (v *VARIANT) ToFloat() float64 {
+	return *(*float64)(unsafe.Pointer(&v.Val))
+}
+
 type EXCEPINFO struct {
 	wCode             uint16
 	wReserved         uint16
