@@ -1,7 +1,6 @@
 package main
 
 import (
-	"log"
 	"time"
 
 	"github.com/mattn/go-ole"
@@ -13,70 +12,42 @@ func main() {
 
 	unknown, err := oleutil.GetActiveObject("Outlook.Application")
 	created := false
-	if err != nil {
-		// not active, create new
+	if err != nil { // not active, create new
 		if unknown, err = oleutil.CreateObject("Outlook.Application"); err != nil {
-			log.Fatal("GetActiveObject/CreatObject:", err)
+			panic(err) // could not find outlook
 		}
-
+		time.Sleep(5 * time.Second) // wait for outlook to start
 		created = true
 	}
 
-	outlook, err := unknown.QueryInterface(ole.IID_IDispatch)
-	if err != nil {
-		log.Fatal("QueryInterface:", err)
-	}
+	outlook, _ := unknown.QueryInterface(ole.IID_IDispatch)
+	namespace := oleutil.MustCallMethod(outlook, "GetNamespace", "MAPI").ToIDispatch()
 
-	// get mapi namespace
-	namespaceVariant, err := oleutil.CallMethod(outlook, "GetNamespace", "MAPI")
-	if err != nil {
-		log.Fatal("GetNamespace:", err)
-	}
-	namespace := namespaceVariant.ToIDispatch()
-
-	// get calendar folder
 	olFolderCalendar := 9
-	calendarVariant, err := oleutil.CallMethod(namespace, "GetDefaultFolder", olFolderCalendar)
-	if err != nil {
-		log.Fatal("GetDefaultFolder:", err)
-	}
-	calendar := calendarVariant.ToIDispatch()
+	calendar := oleutil.MustCallMethod(namespace, "GetDefaultFolder", olFolderCalendar).ToIDispatch()
+	items := oleutil.MustGetProperty(calendar, "Items").ToIDispatch()
 
-	// get appointments
-	itemsVariant, err := oleutil.GetProperty(calendar, "Items")
-	if err != nil {
-		log.Fatal("GetProperty Items:", err)
-	}
-	items := itemsVariant.ToIDispatch()
-
+	// items collection should include recurrence patterns
 	oleutil.MustPutProperty(items, "IncludeRecurrences", "True")
 	oleutil.MustCallMethod(items, "Sort", "[Start]")
 
 	// restrict date range
-	// TODO: Differences in regional date formats?
-	layout := "2006/02/01"
+	layout := "02 Jan 2006"
 	start := time.Now().Format(layout)
 	end := time.Now().AddDate(0, 0, 1).Format(layout)
-	restriction := "[Start] >= '" + start + "' AND [End] <= '" + end + "'"
+	// reversed start/end to filter appointments that overlap this timespan
+	restriction := "[End] >= '" + start + "' AND [Start] <= '" + end + "'"
 
 	appointment := oleutil.MustCallMethod(items, "Find", restriction).ToIDispatch()
 	for appointment != nil {
 		startTime := FloatToTime(oleutil.MustGetProperty(appointment, "Start").ToFloat())
 		subject := oleutil.MustGetProperty(appointment, "Subject").ToString()
-
-		log.Println(startTime, subject)
+		println(startTime.Format(time.RFC822) + " - " + subject)
 
 		appointment = oleutil.MustCallMethod(items, "FindNext").ToIDispatch()
 	}
 
-	log.Println("-- no more appointments --")
-
-	// TODO: is this necessary?
-	items.Release()
-	calendar.Release()
-	namespace.Release()
-
-	// close, if it has been created
+	// cleanup
 	if created {
 		oleutil.CallMethod(outlook, "Quit")
 	}
@@ -85,7 +56,6 @@ func main() {
 }
 
 func FloatToTime(v float64) time.Time {
-	// TODO: timezones?
 	zero := time.Date(1899, 12, 30, 0, 0, 0, 0, time.Local)
 	vd := time.Duration(int64(v * 24 * 60 * 60 * 1000000000))
 
